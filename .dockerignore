@@ -1,0 +1,6 @@
+.github/
+*.md
+LICENSE
+CONTRIBUTING.md
+e2e/
+docs/

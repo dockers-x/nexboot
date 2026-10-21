@@ -1,0 +1,96 @@
+name: Build NexBoot image
+
+on:
+  schedule:
+    # Follow upstream tags daily; build only if a newer tag exists.
+    - cron: "11 4 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  UPSTREAM_REPO: waterlemon0108/nexboot
+  IMAGE: ghcr.io/dockers-x/nexboot
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      skip: ${{ steps.ver.outputs.skip }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve upstream version
+        id: ver
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          UPSTREAM=$(gh release view --repo "$UPSTREAM_REPO" --json tagName -q .tagName | sed 's/^v//')
+          echo "upstream=$UPSTREAM"
+          echo "$UPSTREAM" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "not semver"; echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0; }
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            # On schedule, skip if this tag was already built (ghcr tag exists with same digest of source).
+            if gh release view "v$UPSTREAM" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "v$UPSTREAM already built"; echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
+            fi
+          fi
+          echo "version=$UPSTREAM" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: check
+    if: needs.check.outputs.skip != 'true' && needs.check.outputs.version != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout upstream source
+        run: |
+          git clone --depth 1 --branch "v${{ needs.check.outputs.version }}" \
+            "https://github.com/${UPSTREAM_REPO}.git" src
+
+      - name: Write version file (stamped into binary)
+        run: echo "v${{ needs.check.outputs.version }}" > src/VERSION
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: src
+          file: Dockerfile
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ${{ env.IMAGE }}:v${{ needs.check.outputs.version }}
+            ${{ env.IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Create tracking release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" \
+            --title "v$VERSION" --notes "Upstream $UPSTREAM_REPO v$VERSION" \
+            || echo "release exists"
