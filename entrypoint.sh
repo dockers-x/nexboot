@@ -17,6 +17,10 @@ CHAP_SECRET=${NDISKLESS_CHAP_SECRET:-}
 
 mkdir -p "$ENV_DIR" "$DATA_DIR" "$IMPORT_DIR" /srv/tftp /etc/dnsmasq.d
 
+# Load host kernel modules (needs privileged + host modules present).
+modprobe zfs 2>/dev/null || echo "WARN: modprobe zfs failed - host kernel may lack ZFS support"
+modprobe zfs 2>/dev/null || true
+
 random_hex() { openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | xxd -p; }
 
 # Idempotency: preserve existing credentials across container restarts.

@@ -23,7 +23,7 @@ FROM ubuntu:24.04
 # zfsutils-linux (ZFS pools), keepalived (HA VRRP), qemu-utils (image conversion), curl.
 # Requires privileged container + host network to actually function.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates curl dnsmasq dnsmasq-utils qemu-utils \
+      ca-certificates curl dnsmasq dnsmasq-utils qemu-utils kmod \
       targetcli-fb zfsutils-linux keepalived iproute2 util-linux \
     && rm -rf /var/lib/apt/lists/*
 
